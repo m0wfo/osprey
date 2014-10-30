@@ -1,0 +1,13 @@
+/target
+.project
+.classpath
+.cache
+/.settings
+lib
+.idea
+*.iml
+release.properties
+*.db
+.DS_Store
+keystore.jks
+dependency-reduced-pom.xml
