@@ -1,4 +1,4 @@
-package com.logentries.lb;
+package com.logentries.osprey;
 
 import akka.actor.ActorRef;
 import akka.actor.UntypedActor;
@@ -6,18 +6,34 @@ import akka.io.Tcp;
 import akka.io.Tcp.*;
 import akka.io.TcpMessage;
 import akka.japi.Procedure;
+import com.netflix.config.DynamicIntProperty;
+import com.netflix.config.DynamicPropertyFactory;
 import scala.Option;
 
+import java.io.Serializable;
 import java.net.InetSocketAddress;
 
 /**
- * Created by chris on 25/10/14.
+ * Forwards messages onto a backend.
  */
-public class Client extends UntypedActor {
+class Client extends UntypedActor {
 
-	public static class ClientException extends RuntimeException {
+	/**
+	 * Exception used to signify the failure of a backend connection.
+	 *
+	 * <p>This indicates to a supervising actor/router that it should restart this client.</p>
+	 */
+	static class ClientException extends RuntimeException implements Serializable {
 	}
 
+	private static final String BACKEND_PORT = "backend.port";
+
+	private final DynamicIntProperty backendPort;
+
+	/**
+	 * A connected client assumes the behaviour of this connection handler
+	 * when a connection is successfully established with its backend.
+	 */
 	private class ConnectionHandler implements Procedure<Object> {
 
 		private final ActorRef connection;
@@ -39,7 +55,7 @@ public class Client extends UntypedActor {
 			} else if (msg instanceof Received) {
 				receiver.tell((ClientResponse) () -> (Received) msg, self());
 			} else if (msg instanceof ConnectionClosed) {
-				context().stop(self());
+				throw new ClientException();
 			}
 		}
 	}
@@ -47,12 +63,13 @@ public class Client extends UntypedActor {
 	private final ActorRef ioActor;
 
 	public Client() {
+		this.backendPort = DynamicPropertyFactory.getInstance().getIntProperty(BACKEND_PORT, 0);
 		this.ioActor = Tcp.get(context().system()).manager();
 	}
 
 	@Override
 	public void preStart() {
-		ioActor.tell(TcpMessage.connect(new InetSocketAddress("localhost", 9960)), self());
+		ioActor.tell(TcpMessage.connect(new InetSocketAddress("localhost", backendPort.get())), self());
 	}
 
 	@Override
@@ -68,7 +85,7 @@ public class Client extends UntypedActor {
 			sender().tell(TcpMessage.register(self()), self());
 			getContext().become(new ConnectionHandler(sender()));
 		} else if (message instanceof ConnectionClosed) {
-			context().stop(self());
+			throw new ClientException();
 		} else {
 			unhandled(message);
 		}
